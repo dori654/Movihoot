@@ -1,8 +1,9 @@
 {
   "compilerOptions": {
-    "target": "es2023",
+    "target": "ES2020",
     "module": "esnext",
-    "lib": ["ES2023", "DOM"],
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
     "types": ["vite/client"],
     "skipLibCheck": true,
 
@@ -16,7 +17,6 @@
     /* Linting */
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
   "include": ["src"]
