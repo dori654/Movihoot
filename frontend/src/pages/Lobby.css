@@ -1,0 +1,52 @@
+/* Lobby page styles */
+
+.lobby-card {
+  width: 100%;
+  max-width: 420px;
+}
+
+.lobby-header {
+  text-align: center;
+  margin-bottom: 28px;
+}
+
+.lobby-subtitle {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  margin-top: 8px;
+}
+
+.label-with-icon {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-gold--mt {
+  margin-top: 8px;
+}
+
+.waiting-room {
+  width: 100%;
+  max-width: 460px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.waiting-room-header {
+  text-align: center;
+}
+
+.waiting-room-code {
+  color: var(--text-muted);
+  margin-top: 8px;
+  font-size: 0.875rem;
+}
+
+.room-code-highlight {
+  color: var(--accent-bright);
+  letter-spacing: 0.2em;
+}

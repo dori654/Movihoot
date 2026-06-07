@@ -1,0 +1,6 @@
+/* MovieCard component styles */
+
+.film-placeholder-icon {
+  color: var(--border-bright);
+  opacity: 0.5;
+}

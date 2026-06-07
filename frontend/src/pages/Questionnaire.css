@@ -1,0 +1,46 @@
+/* Questionnaire page styles */
+
+.questionnaire-logo--mb {
+  margin-bottom: 8px;
+}
+
+.submitted-card {
+  max-width: 420px;
+  width: 100%;
+  padding: 48px 32px;
+}
+
+.submitted-logo {
+  margin-bottom: 40px;
+}
+
+.submitted-desc {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.waiting-status--full {
+  width: 100%;
+}
+
+/* Mood grid uses tighter min column width */
+.options-grid--mood {
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+}
+
+/* Stacked option button (length / energy) */
+.option-btn--stacked {
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 10px;
+}
+
+.option-label-main {
+  font-weight: 600;
+}
+
+.option-label-sub {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-weight: 400;
+}

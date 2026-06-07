@@ -1,0 +1,29 @@
+/* HostDashboard page styles */
+
+.spinner--lg {
+  width: 32px;
+  height: 32px;
+  border-width: 3px;
+}
+
+.host-username {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.btn-ghost--sm {
+  padding: 6px 10px;
+  min-height: 32px;
+}
+
+.create-session-desc {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  max-width: 280px;
+}
+
+.session-right-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}

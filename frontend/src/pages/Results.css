@@ -1,0 +1,21 @@
+/* Results page styles */
+
+.spinner--results {
+  width: 36px;
+  height: 36px;
+  border-width: 3px;
+  margin-bottom: 20px;
+}
+
+.loading-heading {
+  color: var(--text-secondary);
+}
+
+.neon-divider--results {
+  margin: 16px auto;
+}
+
+.results-title {
+  color: var(--text-primary);
+  font-size: clamp(1.2rem, 3vw, 1.6rem);
+}
