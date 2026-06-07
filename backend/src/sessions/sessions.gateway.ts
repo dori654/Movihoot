@@ -8,6 +8,8 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { SessionsService } from './sessions.service';
+import { QuestionnaireService } from '../questionnaire/questionnaire.service';
+import { SubmitAnswersDto } from '../questionnaire/dto/submit-answers.dto';
 
 interface JoinPayload {
   roomCode: string;
@@ -21,7 +23,7 @@ interface StartPayload {
 interface AnswersPayload {
   roomCode: string;
   nickname: string;
-  answers: Record<string, unknown>;
+  answers: SubmitAnswersDto;
 }
 
 @WebSocketGateway({ cors: { origin: '*' } })
@@ -34,7 +36,10 @@ export class SessionsGateway implements OnGatewayDisconnect {
     { roomCode: string; nickname: string }
   >();
 
-  constructor(private readonly sessions: SessionsService) {}
+  constructor(
+    private readonly sessions: SessionsService,
+    private readonly questionnaire: QuestionnaireService,
+  ) {}
 
   @SubscribeMessage('join_session')
   async handleJoin(
@@ -60,12 +65,23 @@ export class SessionsGateway implements OnGatewayDisconnect {
   }
 
   @SubscribeMessage('answers_submitted')
-  handleAnswers(@MessageBody() payload: AnswersPayload) {
-    // Questionnaire service handles persistence and AI trigger.
-    // Gateway just re-emits for other modules listening via events if needed.
-    this.server.to(payload.roomCode).emit('answer_received', {
-      nickname: payload.nickname,
-    });
+  async handleAnswers(@MessageBody() payload: AnswersPayload) {
+    const { roomCode, nickname, answers } = payload;
+
+    // Acknowledge receipt to the whole room
+    this.server.to(roomCode).emit('answer_received', { nickname });
+
+    const { allAnswered, answers: allAnswers } =
+      await this.questionnaire.submitAnswers(roomCode, nickname, answers);
+
+    if (allAnswered) {
+      // AI service will be injected in Step 5; for now broadcast empty results
+      // so the flow is wired end-to-end and CI stays green.
+      await this.sessions.setResults(roomCode, []);
+      this.server.to(roomCode).emit('all_answered', { results: [] });
+    }
+
+    return { allAnswers };
   }
 
   async handleDisconnect(client: Socket) {
