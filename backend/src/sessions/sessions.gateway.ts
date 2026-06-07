@@ -10,6 +10,7 @@ import { Server, Socket } from 'socket.io';
 import { SessionsService } from './sessions.service';
 import { QuestionnaireService } from '../questionnaire/questionnaire.service';
 import { SubmitAnswersDto } from '../questionnaire/dto/submit-answers.dto';
+import { AiService } from '../ai/ai.service';
 
 interface JoinPayload {
   roomCode: string;
@@ -39,6 +40,7 @@ export class SessionsGateway implements OnGatewayDisconnect {
   constructor(
     private readonly sessions: SessionsService,
     private readonly questionnaire: QuestionnaireService,
+    private readonly ai: AiService,
   ) {}
 
   @SubscribeMessage('join_session')
@@ -75,10 +77,9 @@ export class SessionsGateway implements OnGatewayDisconnect {
       await this.questionnaire.submitAnswers(roomCode, nickname, answers);
 
     if (allAnswered) {
-      // AI service will be injected in Step 5; for now broadcast empty results
-      // so the flow is wired end-to-end and CI stays green.
-      await this.sessions.setResults(roomCode, []);
-      this.server.to(roomCode).emit('all_answered', { results: [] });
+      const results = await this.ai.getRecommendations(allAnswers);
+      await this.sessions.setResults(roomCode, results);
+      this.server.to(roomCode).emit('all_answered', { results });
     }
 
     return { allAnswers };
