@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useSocket } from '../hooks/useSocket';
 import ParticipantList from '../components/ParticipantList';
 
@@ -15,8 +15,9 @@ interface UserLeftPayload {
 export default function Lobby() {
   const { emit, on } = useSocket();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
-  const [roomCode, setRoomCode] = useState('');
+  const [roomCode, setRoomCode] = useState(() => searchParams.get('room') ?? '');
   const [nickname, setNickname] = useState('');
   const [joined, setJoined] = useState(false);
   const [participants, setParticipants] = useState<string[]>([]);

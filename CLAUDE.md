@@ -186,14 +186,14 @@ cd frontend && npm run dev
 ```
 
 ## Current Status
-- [ ] Firebase project created and configured
-- [ ] NestJS project scaffolded
-- [ ] React project scaffolded
-- [ ] firebase.service.ts (Admin SDK)
-- [ ] auth.guard.ts
-- [ ] sessions.module + controller + service
-- [ ] sessions.gateway.ts (WebSockets)
-- [ ] questionnaire.module + service
-- [ ] ai.service.ts (Claude + TMDB)
-- [ ] Frontend pages (HostDashboard, Lobby, Questionnaire, Results)
-- [ ] End-to-end session flow tested
+- [ ] Firebase project created and configured (needs real credentials in .env)
+- [x] NestJS project scaffolded
+- [x] React project scaffolded
+- [x] firebase.service.ts (Admin SDK)
+- [x] auth.guard.ts
+- [x] sessions.module + controller + service
+- [x] sessions.gateway.ts (WebSockets)
+- [x] questionnaire.module + service
+- [x] ai.service.ts (Claude + TMDB)
+- [x] Frontend pages (HostDashboard, Lobby, Questionnaire, Results)
+- [ ] End-to-end session flow tested (needs real Firebase + API keys in .env)
