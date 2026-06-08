@@ -53,13 +53,20 @@ export class AiService {
     });
 
     const raw = (message.content[0] as { type: string; text: string }).text;
+    // Claude sometimes wraps JSON in markdown fences despite instructions not to
+    const cleaned = raw.trim().replace(/^```(?:json)?\s*|\s*```$/g, '');
     let parsed: ClaudeResponse;
 
     try {
-      parsed = JSON.parse(raw) as ClaudeResponse;
+      parsed = JSON.parse(cleaned) as ClaudeResponse;
     } catch {
-      this.logger.error('Failed to parse Claude response', raw);
-      return [];
+      this.logger.error(`Failed to parse Claude response: ${raw}`);
+      throw new Error('Could not parse Claude recommendations response');
+    }
+
+    if (!Array.isArray(parsed.movies) || parsed.movies.length === 0) {
+      this.logger.error(`Claude response had no movies: ${raw}`);
+      throw new Error('Claude response contained no movie recommendations');
     }
 
     return this.enrichWithTmdb(parsed.movies);

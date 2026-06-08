@@ -2,13 +2,18 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useSocket } from '../hooks/useSocket';
-import { createSession, startSession } from '../services/api';
+import { createSession, getSession, startSession } from '../services/api';
 import QRCodeDisplay from '../components/QRCode';
 import ParticipantList from '../components/ParticipantList';
+import type { MovieResult } from './Results';
 import './HostDashboard.css';
 
-interface UserJoinedPayload { nickname: string; count: number }
-interface UserLeftPayload   { nickname: string }
+interface UserJoinedPayload      { nickname: string; count: number }
+interface UserLeftPayload        { nickname: string }
+interface AllAnsweredPayload     { results: MovieResult[] }
+interface RecommendationErrorPayload { message: string }
+
+const ROOM_CODE_STORAGE_KEY = 'movihoot_host_room_code';
 
 /* ---------- SVG icons ---------- */
 function FilmIcon() {
@@ -49,9 +54,30 @@ export default function HostDashboard() {
   const [roomCode, setRoomCode]         = useState<string | null>(null);
   const [participants, setParticipants] = useState<string[]>([]);
   const [creating, setCreating]         = useState(false);
+  const [createError, setCreateError]   = useState<string | null>(null);
+  const [waitingForResults, setWaiting] = useState(false);
+  const [recError, setRecError]         = useState<string | null>(null);
+
+  // Restore an in-progress session after a page refresh (roomCode lives only in memory otherwise)
+  useEffect(() => {
+    if (!user) return;
+    const savedRoomCode = sessionStorage.getItem(ROOM_CODE_STORAGE_KEY);
+    if (!savedRoomCode) return;
+
+    getSession(savedRoomCode)
+      .then((session) => {
+        setRoomCode(session.roomCode);
+        setParticipants(session.participants);
+      })
+      .catch(() => sessionStorage.removeItem(ROOM_CODE_STORAGE_KEY));
+  }, [user]);
 
   useEffect(() => {
     if (!roomCode) return;
+
+    // Join the Socket.io broadcast room — without this the host never receives
+    // user_joined/user_left events (only sockets that joined the room get them)
+    emit('watch_session', { roomCode });
 
     const offJoined  = on<UserJoinedPayload>('user_joined', ({ nickname }) => {
       setParticipants((prev) => prev.includes(nickname) ? prev : [...prev, nickname]);
@@ -59,19 +85,40 @@ export default function HostDashboard() {
     const offLeft    = on<UserLeftPayload>('user_left', ({ nickname }) => {
       setParticipants((prev) => prev.filter((n) => n !== nickname));
     });
-    const offStarted = on('session_started', () => { void navigate('/q'); });
+    // The host doesn't answer the questionnaire (not in `participants`) — they
+    // wait here (keeping the socket alive) until `all_answered` arrives, then
+    // navigate to the shared results/TV view with the results in hand
+    const offStarted = on('session_started', () => {
+      setRecError(null);
+      setWaiting(true);
+    });
+    const offAllAnswered = on<AllAnsweredPayload>('all_answered', ({ results }) => {
+      void navigate('/results', { state: { results } });
+    });
+    const offRecError = on<RecommendationErrorPayload>('recommendation_error', ({ message }) => {
+      setRecError(message);
+    });
 
-    return () => { offJoined(); offLeft(); offStarted(); };
-  }, [roomCode, on, navigate]);
+    return () => { offJoined(); offLeft(); offStarted(); offAllAnswered(); offRecError(); };
+  }, [roomCode, emit, on, navigate]);
 
   const handleCreate = async () => {
     setCreating(true);
+    setCreateError(null);
     try {
       const { roomCode: code } = await createSession();
+      sessionStorage.setItem(ROOM_CODE_STORAGE_KEY, code);
       setRoomCode(code);
+    } catch {
+      setCreateError('יצירת החדר נכשלה — בדקו שהשרת פועל ונסו שוב');
     } finally {
       setCreating(false);
     }
+  };
+
+  const handleLogOut = async () => {
+    sessionStorage.removeItem(ROOM_CODE_STORAGE_KEY);
+    await logOut();
   };
 
   const handleStart = async () => {
@@ -130,7 +177,7 @@ export default function HostDashboard() {
               {user.displayName?.charAt(0).toUpperCase() ?? 'H'}
             </div>
             <span className="host-username">{user.displayName}</span>
-            <button className="btn-ghost btn-ghost--sm" onClick={() => void logOut()} aria-label="יציאה">
+            <button className="btn-ghost btn-ghost--sm" onClick={() => void handleLogOut()} aria-label="יציאה">
               <LogOutIcon />
             </button>
           </div>
@@ -147,6 +194,33 @@ export default function HostDashboard() {
               ? <><div className="spinner" />יוצר חדר...</>
               : <><PlayIcon />צור חדר</>}
           </button>
+          {createError && (
+            <p style={{ color: '#f87171', fontSize: '0.8rem', textAlign: 'center', marginTop: '0.5rem' }}>
+              {createError}
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  /* ---- Waiting for AI results screen ---- */
+  if (waitingForResults) {
+    return (
+      <div className="page-center">
+        <div className="card signin-card">
+          <h1 className="logo">MOVIHOOT</h1>
+          <div className="neon-divider" />
+          {recError ? (
+            <p style={{ color: '#f87171', fontSize: '0.9rem', textAlign: 'center' }}>
+              {recError}
+            </p>
+          ) : (
+            <>
+              <div className="spinner spinner--lg" />
+              <p className="signin-tagline">Claude מנתח את העדפות הקבוצה ובונה 5 המלצות...</p>
+            </>
+          )}
         </div>
       </div>
     );
@@ -157,7 +231,7 @@ export default function HostDashboard() {
     <div className="page">
       <header className="host-header">
         <h1 className="logo">MOVIHOOT</h1>
-        <button className="btn-ghost" onClick={() => void logOut()} aria-label="יציאה">
+        <button className="btn-ghost" onClick={() => void handleLogOut()} aria-label="יציאה">
           <LogOutIcon />
           יציאה
         </button>

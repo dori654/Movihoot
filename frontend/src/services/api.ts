@@ -19,8 +19,17 @@ export interface CreateSessionResponse {
   roomCode: string;
 }
 
+export interface SessionInfo {
+  roomCode: string;
+  status: 'lobby' | 'active' | 'done';
+  participants: string[];
+}
+
 export const createSession = () =>
   api.post<CreateSessionResponse>('/sessions').then((r) => r.data);
+
+export const getSession = (roomCode: string) =>
+  api.get<SessionInfo>(`/sessions/${roomCode}`).then((r) => r.data);
 
 export const startSession = (roomCode: string) =>
   api.patch(`/sessions/${roomCode}/start`);

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { FirebaseService } from '../firebase/firebase.service';
 import { SubmitAnswersDto } from './dto/submit-answers.dto';
 
@@ -14,6 +14,8 @@ export interface SubmitResult {
 
 @Injectable()
 export class QuestionnaireService {
+  private readonly logger = new Logger(QuestionnaireService.name);
+
   constructor(private readonly firebase: FirebaseService) {}
 
   async submitAnswers(
@@ -48,6 +50,13 @@ export class QuestionnaireService {
 
     const allAnswered =
       participants.length > 0 && answers.length >= participants.length;
+
+    this.logger.log(
+      `[${roomCode}] "${nickname}" answered — ` +
+        `participants=[${participants.join(', ')}] (${participants.length}), ` +
+        `answers=[${answers.map((a) => a.nickname).join(', ')}] (${answers.length}), ` +
+        `allAnswered=${allAnswered}`,
+    );
 
     return { allAnswered, answers };
   }

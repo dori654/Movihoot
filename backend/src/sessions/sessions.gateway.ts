@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import {
   WebSocketGateway,
   WebSocketServer,
@@ -29,6 +30,8 @@ interface AnswersPayload {
 
 @WebSocketGateway({ cors: { origin: '*' } })
 export class SessionsGateway implements OnGatewayDisconnect {
+  private readonly logger = new Logger(SessionsGateway.name);
+
   @WebSocketServer()
   server: Server;
 
@@ -42,6 +45,14 @@ export class SessionsGateway implements OnGatewayDisconnect {
     private readonly questionnaire: QuestionnaireService,
     private readonly ai: AiService,
   ) {}
+
+  @SubscribeMessage('watch_session')
+  async handleWatch(
+    @MessageBody() payload: StartPayload,
+    @ConnectedSocket() client: Socket,
+  ) {
+    await client.join(payload.roomCode);
+  }
 
   @SubscribeMessage('join_session')
   async handleJoin(
@@ -77,9 +88,19 @@ export class SessionsGateway implements OnGatewayDisconnect {
       await this.questionnaire.submitAnswers(roomCode, nickname, answers);
 
     if (allAnswered) {
-      const results = await this.ai.getRecommendations(allAnswers);
-      await this.sessions.setResults(roomCode, results);
-      this.server.to(roomCode).emit('all_answered', { results });
+      try {
+        const results = await this.ai.getRecommendations(allAnswers);
+        if (results.length === 0) {
+          throw new Error('AI returned no recommendations');
+        }
+        await this.sessions.setResults(roomCode, results);
+        this.server.to(roomCode).emit('all_answered', { results });
+      } catch (err) {
+        this.logger.error('Failed to generate recommendations', err);
+        this.server.to(roomCode).emit('recommendation_error', {
+          message: 'משהו השתבש בעת יצירת ההמלצות. נסו ליצור סשן חדש ולנסות שוב.',
+        });
+      }
     }
 
     return { allAnswers };

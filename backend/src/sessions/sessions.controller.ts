@@ -1,11 +1,13 @@
 import {
   Controller,
+  Get,
   Post,
   Patch,
   Param,
   UseGuards,
   HttpCode,
   HttpStatus,
+  ForbiddenException,
 } from '@nestjs/common';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../auth/auth.decorator';
@@ -21,6 +23,23 @@ export class SessionsController {
   async createSession(@CurrentUser() user: DecodedIdToken) {
     const roomCode = await this.sessions.createSession(user.uid);
     return { roomCode };
+  }
+
+  @Get(':roomCode')
+  @UseGuards(AuthGuard)
+  async getSession(
+    @Param('roomCode') roomCode: string,
+    @CurrentUser() user: DecodedIdToken,
+  ) {
+    const session = await this.sessions.getSession(roomCode);
+    if (session.hostId !== user.uid) {
+      throw new ForbiddenException('You do not own this session');
+    }
+    return {
+      roomCode,
+      status: session.status,
+      participants: session.participants,
+    };
   }
 
   @Patch(':roomCode/start')

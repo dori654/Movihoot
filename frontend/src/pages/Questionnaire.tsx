@@ -29,8 +29,9 @@ const ENERGY = [
 const STEPS      = 4;
 const STEP_LABELS = ['מצב רוח', "ז'אנרים", 'אורך', 'אנרגיה'];
 
-interface LocationState     { roomCode: string; nickname: string }
+interface LocationState      { roomCode: string; nickname: string }
 interface AllAnsweredPayload { results: MovieResult[] }
+interface RecommendationErrorPayload { message: string }
 
 function CheckIcon() {
   return (
@@ -65,12 +66,16 @@ export default function Questionnaire() {
   const [length, setLength]       = useState<'short' | 'medium' | 'long'>('medium');
   const [energyLevel, setEnergy]  = useState<'low' | 'medium' | 'high'>('medium');
   const [submitted, setSubmitted] = useState(false);
+  const [recError, setRecError]   = useState<string | null>(null);
 
   useEffect(() => {
     const offAll = on<AllAnsweredPayload>('all_answered', ({ results }) => {
       void navigate('/results', { state: { results } });
     });
-    return offAll;
+    const offRecError = on<RecommendationErrorPayload>('recommendation_error', ({ message }) => {
+      setRecError(message);
+    });
+    return () => { offAll(); offRecError(); };
   }, [on, navigate]);
 
   const toggleGenre = (g: string) => {
@@ -99,11 +104,19 @@ export default function Questionnaire() {
               <CheckIcon />
             </div>
             <h2>תשובות נשלחו!</h2>
-            <p className="submitted-desc">Claude מנתח את העדפות הקבוצה...</p>
-            <div className="waiting-status waiting-status--full">
-              <div className="spinner" />
-              ממתין לשאר המשתתפים
-            </div>
+            {recError ? (
+              <p style={{ color: '#f87171', fontSize: '0.9rem', textAlign: 'center' }}>
+                {recError}
+              </p>
+            ) : (
+              <>
+                <p className="submitted-desc">Claude מנתח את העדפות הקבוצה...</p>
+                <div className="waiting-status waiting-status--full">
+                  <div className="spinner" />
+                  ממתין לשאר המשתתפים
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
