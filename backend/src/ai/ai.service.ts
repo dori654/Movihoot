@@ -47,7 +47,8 @@ export class AiService {
           content:
             `A group of ${answers.length} people answered these questions:\n\n` +
             `${summary}\n\n` +
-            `Return JSON: { "movies": [ { "tmdbId": number, "title": string, "reason": string, "matchScore": number } ] }`,
+            `Return JSON: { "movies": [ { "tmdbId": number, "title": string, "reason": string, "matchScore": number } ] }\n` +
+            `"matchScore" must be an integer from 0 to 100 representing the percentage match with the group's preferences.`,
         },
       ],
     });
