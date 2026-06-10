@@ -176,6 +176,12 @@ export class SessionsGateway implements OnGatewayDisconnect {
     if (!payload) return wsError('INVALID_PAYLOAD');
     const { roomCode, nickname, answers } = payload;
 
+    // The submitting socket must be the one that joined as this nickname —
+    // otherwise any participant could submit answers on behalf of another
+    if (this.liveNicknames.get(roomCode)?.get(nickname) !== client.id) {
+      return wsError('NOT_PARTICIPANT');
+    }
+
     let submitResult: SubmitResult;
     try {
       submitResult = await this.questionnaire.submitAnswers(
