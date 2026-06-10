@@ -2,6 +2,11 @@ import { useLocation } from 'react-router-dom';
 import MovieCard from '../components/MovieCard';
 import './Results.css';
 
+export interface WatchProvider {
+  providerName: string;
+  logoPath:     string;
+}
+
 export interface MovieResult {
   tmdbId:      number;
   title:       string;
@@ -11,6 +16,7 @@ export interface MovieResult {
   overview?:   string;
   releaseYear?: string;
   runtime?:    number;
+  providers?:  WatchProvider[];
 }
 
 interface LocationState { results: MovieResult[] }

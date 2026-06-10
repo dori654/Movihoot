@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useSocket } from '../hooks/useSocket';
+import { useSocket, type WsAck } from '../hooks/useSocket';
 import ParticipantList from '../components/ParticipantList';
 import './Lobby.css';
 
 interface UserJoinedPayload { nickname: string; count: number }
 interface UserLeftPayload   { nickname: string }
+type JoinAck = WsAck<{ participants: string[] }>;
+
+export const PARTICIPANT_STORAGE_KEY = 'movihoot_participant';
 
 function UserIcon() {
   return (
@@ -26,13 +29,16 @@ function ArrowIcon() {
 }
 
 export default function Lobby() {
-  const { emit, on }   = useSocket();
+  const { emitWithAck, on, status } = useSocket();
   const navigate       = useNavigate();
   const [searchParams] = useSearchParams();
 
   const [roomCode, setRoomCode]         = useState(() => searchParams.get('room') ?? '');
   const [nickname, setNickname]         = useState('');
   const [joined, setJoined]             = useState(false);
+  const [joining, setJoining]           = useState(false);
+  const [joinError, setJoinError]       = useState<string | null>(null);
+  const [hostAway, setHostAway]         = useState(false);
   const [participants, setParticipants] = useState<string[]>([]);
 
   useEffect(() => {
@@ -47,15 +53,41 @@ export default function Lobby() {
     const offStarted = on('session_started', () => {
       void navigate('/q', { state: { roomCode, nickname } });
     });
+    const offHostLeft = on('host_left', () => setHostAway(true));
+    const offHostBack = on('host_back', () => setHostAway(false));
 
-    return () => { offJoined(); offLeft(); offStarted(); };
+    return () => { offJoined(); offLeft(); offStarted(); offHostLeft(); offHostBack(); };
   }, [joined, roomCode, nickname, on, navigate]);
 
-  const handleJoin = () => {
-    if (!roomCode.trim() || !nickname.trim()) return;
-    emit('join_session', { roomCode: roomCode.toUpperCase(), nickname });
-    setParticipants([nickname]);
-    setJoined(true);
+  // Re-register with the server after a reconnect — the server forgets the
+  // socket-to-nickname mapping when the old socket drops
+  useEffect(() => {
+    if (!joined || status !== 'connected') return;
+    emitWithAck<JoinAck>('join_session', { roomCode, nickname })
+      .then((ack) => { if (ack.ok) setParticipants(ack.participants); })
+      .catch(() => { /* banner already shows the connection problem */ });
+  }, [joined, status, roomCode, nickname, emitWithAck]);
+
+  const handleJoin = async () => {
+    const code = roomCode.trim().toUpperCase();
+    if (code.length !== 6 || !nickname.trim()) return;
+
+    setJoining(true);
+    setJoinError(null);
+    try {
+      const ack = await emitWithAck<JoinAck>('join_session', { roomCode: code, nickname });
+      if (!ack.ok) {
+        setJoinError(ack.message);
+        return;
+      }
+      sessionStorage.setItem(PARTICIPANT_STORAGE_KEY, JSON.stringify({ roomCode: code, nickname }));
+      setParticipants(ack.participants);
+      setJoined(true);
+    } catch {
+      setJoinError('החיבור לשרת נכשל — בדקו שהשרת פועל ונסו שוב');
+    } finally {
+      setJoining(false);
+    }
   };
 
   /* ---- Join form ---- */
@@ -96,17 +128,22 @@ export default function Lobby() {
                 value={nickname}
                 onChange={(e) => setNickname(e.target.value)}
                 maxLength={20}
-                onKeyDown={(e) => { if (e.key === 'Enter') handleJoin(); }}
+                onKeyDown={(e) => { if (e.key === 'Enter') void handleJoin(); }}
               />
             </div>
 
+            {joinError && (
+              <p className="form-error" role="alert">{joinError}</p>
+            )}
+
             <button
               className="btn-gold btn-gold--mt"
-              onClick={handleJoin}
-              disabled={roomCode.length !== 6 || nickname.length === 0}
+              onClick={() => void handleJoin()}
+              disabled={roomCode.length !== 6 || nickname.length === 0 || joining}
             >
-              <ArrowIcon />
-              הצטרף
+              {joining
+                ? <><div className="spinner" />מצטרף...</>
+                : <><ArrowIcon />הצטרף</>}
             </button>
           </div>
         </div>
@@ -128,6 +165,10 @@ export default function Lobby() {
         <div className="card card-glow">
           <ParticipantList participants={participants} />
         </div>
+
+        {hostAway && (
+          <p className="form-error" role="alert">המארח התנתק — ממתינים שיחזור...</p>
+        )}
 
         <div className="waiting-status">
           <div className="spinner" />

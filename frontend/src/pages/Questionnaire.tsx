@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useSocket } from '../hooks/useSocket';
+import { useSocket, type WsAck } from '../hooks/useSocket';
+import { getFilmCards, type FilmCard } from '../services/api';
+import { PARTICIPANT_STORAGE_KEY } from './Lobby';
 import type { MovieResult } from './Results';
 import './Questionnaire.css';
 
@@ -26,12 +28,19 @@ const ENERGY = [
   { label: 'גבוהה',   sub: 'פנייר וסושי', value: 'high'   },
 ] as const;
 
-const STEPS      = 4;
-const STEP_LABELS = ['מצב רוח', "ז'אנרים", 'אורך', 'אנרגיה'];
+const TMDB_IMG = 'https://image.tmdb.org/t/p/w500';
 
 interface LocationState      { roomCode: string; nickname: string }
 interface AllAnsweredPayload { results: MovieResult[] }
 interface RecommendationErrorPayload { message: string }
+
+function readStoredIdentity(): LocationState {
+  try {
+    const raw = sessionStorage.getItem(PARTICIPANT_STORAGE_KEY);
+    if (raw) return JSON.parse(raw) as LocationState;
+  } catch { /* fall through to defaults */ }
+  return { roomCode: '', nickname: 'אורח' };
+}
 
 function CheckIcon() {
   return (
@@ -53,20 +62,36 @@ function ArrowIcon() {
 export default function Questionnaire() {
   const location     = useLocation();
   const navigate     = useNavigate();
-  const { emit, on } = useSocket();
+  const { emitWithAck, on, status } = useSocket();
 
-  const { roomCode, nickname } = (location.state as LocationState | null) ?? {
-    roomCode: '',
-    nickname: 'אורח',
-  };
+  const { roomCode, nickname } =
+    (location.state as LocationState | null) ?? readStoredIdentity();
 
   const [step, setStep]           = useState(0);
   const [mood, setMood]           = useState('');
   const [genres, setGenres]       = useState<string[]>([]);
   const [length, setLength]       = useState<'short' | 'medium' | 'long'>('medium');
   const [energyLevel, setEnergy]  = useState<'low' | 'medium' | 'high'>('medium');
+  const [films, setFilms]         = useState<FilmCard[]>([]);
+  const [filmIndex, setFilmIndex] = useState(0);
+  const [knownFilms, setKnown]    = useState<number[]>([]);
+  const [likedFilms, setLiked]    = useState<number[]>([]);
   const [submitted, setSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [recError, setRecError]   = useState<string | null>(null);
+  const [hostAway, setHostAway]   = useState(false);
+
+  // The known-films step only exists when the server has film cards
+  const hasFilmsStep = films.length > 0;
+  const totalSteps   = hasFilmsStep ? 5 : 4;
+  const stepLabels   = ['מצב רוח', "ז'אנרים", 'אורך', 'אנרגיה', ...(hasFilmsStep ? ['סרטים'] : [])];
+
+  useEffect(() => {
+    if (!roomCode) return;
+    getFilmCards(roomCode)
+      .then(({ films: cards }) => setFilms(cards))
+      .catch(() => setFilms([])); // step is skipped gracefully without cards
+  }, [roomCode]);
 
   useEffect(() => {
     const offAll = on<AllAnsweredPayload>('all_answered', ({ results }) => {
@@ -75,23 +100,62 @@ export default function Questionnaire() {
     const offRecError = on<RecommendationErrorPayload>('recommendation_error', ({ message }) => {
       setRecError(message);
     });
-    return () => { offAll(); offRecError(); };
+    const offHostLeft = on('host_left', () => setHostAway(true));
+    const offHostBack = on('host_back', () => setHostAway(false));
+    return () => { offAll(); offRecError(); offHostLeft(); offHostBack(); };
   }, [on, navigate]);
+
+  // Rejoin the socket room after a reconnect, otherwise all_answered never
+  // reaches us (the server allows rejoining an active session)
+  useEffect(() => {
+    if (!roomCode || status !== 'connected') return;
+    emitWithAck('join_session', { roomCode, nickname }).catch(() => {
+      /* banner already shows the connection problem */
+    });
+  }, [roomCode, nickname, status, emitWithAck]);
 
   const toggleGenre = (g: string) => {
     setGenres((prev) => prev.includes(g) ? prev.filter((x) => x !== g) : [...prev, g]);
   };
 
-  const handleSubmit = () => {
-    emit('answers_submitted', {
-      roomCode,
-      nickname,
-      answers: { mood, genres, length, energyLevel, knownFilms: [] },
-    });
+  const submitAnswers = async (known: number[], liked: number[]) => {
     setSubmitted(true);
+    setSubmitError(null);
+    try {
+      const ack = await emitWithAck<WsAck>('answers_submitted', {
+        roomCode,
+        nickname,
+        answers: { mood, genres, length, energyLevel, knownFilms: known, likedFilms: liked },
+      });
+      if (!ack.ok) setSubmitError(ack.message);
+    } catch {
+      setSubmitError('שליחת התשובות נכשלה — בדקו את החיבור ונסו שוב');
+    }
   };
 
-  const progress = (step / STEPS) * 100;
+  const handleEnergyNext = () => {
+    if (hasFilmsStep) setStep(4);
+    else void submitAnswers(knownFilms, likedFilms);
+  };
+
+  // seen: 'liked' | 'seen' | 'no' — last card submits automatically
+  const handleFilmAnswer = (verdict: 'liked' | 'seen' | 'no') => {
+    const film = films[filmIndex];
+    const known = verdict === 'no' ? knownFilms : [...knownFilms, film.tmdbId];
+    const liked = verdict === 'liked' ? [...likedFilms, film.tmdbId] : likedFilms;
+    setKnown(known);
+    setLiked(liked);
+
+    if (filmIndex + 1 < films.length) setFilmIndex(filmIndex + 1);
+    else void submitAnswers(known, liked);
+  };
+
+  const handleRetrySubmit = () => {
+    setSubmitted(false);
+    setSubmitError(null);
+  };
+
+  const progress = (step / totalSteps) * 100;
 
   /* ---- Submitted state ---- */
   if (submitted) {
@@ -100,21 +164,33 @@ export default function Questionnaire() {
         <h1 className="logo submitted-logo">MOVIHOOT</h1>
         <div className="card submitted-card">
           <div className="submitted-state">
-            <div className="check-circle">
-              <CheckIcon />
-            </div>
-            <h2>תשובות נשלחו!</h2>
-            {recError ? (
-              <p style={{ color: '#f87171', fontSize: '0.9rem', textAlign: 'center' }}>
-                {recError}
-              </p>
+            {submitError ? (
+              <>
+                <p className="form-error" role="alert">{submitError}</p>
+                <button className="btn-primary" onClick={handleRetrySubmit}>
+                  נסו שוב
+                </button>
+              </>
             ) : (
               <>
-                <p className="submitted-desc">Claude מנתח את העדפות הקבוצה...</p>
-                <div className="waiting-status waiting-status--full">
-                  <div className="spinner" />
-                  ממתין לשאר המשתתפים
+                <div className="check-circle">
+                  <CheckIcon />
                 </div>
+                <h2>תשובות נשלחו!</h2>
+                {recError ? (
+                  <p className="form-error" role="alert">{recError}</p>
+                ) : (
+                  <>
+                    <p className="submitted-desc">Claude מנתח את העדפות הקבוצה...</p>
+                    {hostAway && (
+                      <p className="form-error" role="alert">המארח התנתק — ממתינים שיחזור...</p>
+                    )}
+                    <div className="waiting-status waiting-status--full">
+                      <div className="spinner" />
+                      ממתין לשאר המשתתפים
+                    </div>
+                  </>
+                )}
               </>
             )}
           </div>
@@ -135,7 +211,7 @@ export default function Questionnaire() {
 
       <div className="question-card card">
         <p className="question-step-label">
-          שלב {step + 1} מתוך {STEPS} — {STEP_LABELS[step]}
+          שלב {step + 1} מתוך {totalSteps} — {stepLabels[step]}
         </p>
 
         {/* Step 0: Mood */}
@@ -219,10 +295,54 @@ export default function Questionnaire() {
                 </button>
               ))}
             </div>
-            <button className="btn-gold" onClick={handleSubmit}>
-              <CheckIcon />
-              שלח תשובות
-            </button>
+            {hasFilmsStep ? (
+              <button className="btn-primary" onClick={handleEnergyNext}>
+                הבא <ArrowIcon />
+              </button>
+            ) : (
+              <button className="btn-gold" onClick={handleEnergyNext}>
+                <CheckIcon />
+                שלח תשובות
+              </button>
+            )}
+          </>
+        )}
+
+        {/* Step 4: Known films */}
+        {step === 4 && hasFilmsStep && (
+          <>
+            <h2 className="question-title">הכרת סרטים — ראית את הסרט הזה?</h2>
+            <p className="film-progress">
+              סרט {filmIndex + 1} מתוך {films.length}
+            </p>
+            <div className="film-card" key={films[filmIndex].tmdbId}>
+              {films[filmIndex].posterPath ? (
+                <img
+                  src={`${TMDB_IMG}${films[filmIndex].posterPath}`}
+                  alt={`פוסטר של ${films[filmIndex].title}`}
+                  className="film-card-poster"
+                />
+              ) : (
+                <div className="film-card-poster film-card-poster--empty" aria-hidden="true" />
+              )}
+              <p className="film-card-title">
+                {films[filmIndex].title}
+                {films[filmIndex].releaseYear && (
+                  <span className="film-card-year"> ({films[filmIndex].releaseYear})</span>
+                )}
+              </p>
+            </div>
+            <div className="film-actions">
+              <button className="btn-gold film-action-btn" onClick={() => handleFilmAnswer('liked')}>
+                ראיתי ואהבתי
+              </button>
+              <button className="btn-primary film-action-btn" onClick={() => handleFilmAnswer('seen')}>
+                ראיתי
+              </button>
+              <button className="btn-ghost film-action-btn" onClick={() => handleFilmAnswer('no')}>
+                לא ראיתי
+              </button>
+            </div>
           </>
         )}
       </div>

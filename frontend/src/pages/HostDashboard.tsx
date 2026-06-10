@@ -48,7 +48,7 @@ function LogOutIcon() {
 
 export default function HostDashboard() {
   const { user, loading, error: authError, signIn, logOut } = useAuth();
-  const { emit, on } = useSocket();
+  const { emitWithAck, on, status } = useSocket();
   const navigate = useNavigate();
 
   const [roomCode, setRoomCode]         = useState<string | null>(null);
@@ -57,6 +57,7 @@ export default function HostDashboard() {
   const [createError, setCreateError]   = useState<string | null>(null);
   const [waitingForResults, setWaiting] = useState(false);
   const [recError, setRecError]         = useState<string | null>(null);
+  const [startError, setStartError]     = useState<string | null>(null);
 
   // Restore an in-progress session after a page refresh (roomCode lives only in memory otherwise)
   useEffect(() => {
@@ -73,11 +74,35 @@ export default function HostDashboard() {
   }, [user]);
 
   useEffect(() => {
-    if (!roomCode) return;
+    if (!roomCode || !user || status !== 'connected') return;
+    let cancelled = false;
 
     // Join the Socket.io broadcast room — without this the host never receives
-    // user_joined/user_left events (only sockets that joined the room get them)
-    emit('watch_session', { roomCode });
+    // user_joined/user_left events (only sockets that joined the room get them).
+    // Requires the Firebase ID token; the server verifies we own the session.
+    // `status` is a dependency so a reconnect re-joins the broadcast room.
+    const watch = async () => {
+      try {
+        const token = await user.getIdToken();
+        const ack = await emitWithAck<
+          { ok: true; participants: string[] } | { ok: false; code: string; message: string }
+        >('watch_session', { roomCode, token });
+        if (cancelled) return;
+        if (!ack.ok) {
+          if (ack.code === 'SESSION_EXPIRED' || ack.code === 'ROOM_NOT_FOUND') {
+            sessionStorage.removeItem(ROOM_CODE_STORAGE_KEY);
+            setRoomCode(null);
+          } else {
+            setCreateError(ack.message);
+          }
+          return;
+        }
+        setParticipants(ack.participants);
+      } catch {
+        // socket not ready / ack timed out — the connection banner covers this
+      }
+    };
+    void watch();
 
     const offJoined  = on<UserJoinedPayload>('user_joined', ({ nickname }) => {
       setParticipants((prev) => prev.includes(nickname) ? prev : [...prev, nickname]);
@@ -99,8 +124,11 @@ export default function HostDashboard() {
       setRecError(message);
     });
 
-    return () => { offJoined(); offLeft(); offStarted(); offAllAnswered(); offRecError(); };
-  }, [roomCode, emit, on, navigate]);
+    return () => {
+      cancelled = true;
+      offJoined(); offLeft(); offStarted(); offAllAnswered(); offRecError();
+    };
+  }, [roomCode, user, status, emitWithAck, on, navigate]);
 
   const handleCreate = async () => {
     setCreating(true);
@@ -121,10 +149,15 @@ export default function HostDashboard() {
     await logOut();
   };
 
+  // The server broadcasts session_started to the room (including this host)
   const handleStart = async () => {
     if (!roomCode) return;
-    await startSession(roomCode);
-    emit('start_session', { roomCode });
+    setStartError(null);
+    try {
+      await startSession(roomCode);
+    } catch {
+      setStartError('התחלת הסשן נכשלה — נסו שוב');
+    }
   };
 
   /* ---- Loading ---- */
@@ -259,6 +292,9 @@ export default function HostDashboard() {
             <PlayIcon />
             התחל סשן ({participants.length} משתתפים)
           </button>
+          {startError && (
+            <p className="form-error" role="alert">{startError}</p>
+          )}
         </div>
       </div>
     </div>

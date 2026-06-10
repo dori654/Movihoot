@@ -25,6 +25,13 @@ export interface SessionInfo {
   participants: string[];
 }
 
+export interface FilmCard {
+  tmdbId: number;
+  title: string;
+  posterPath: string | null;
+  releaseYear?: string;
+}
+
 export const createSession = () =>
   api.post<CreateSessionResponse>('/sessions').then((r) => r.data);
 
@@ -33,5 +40,8 @@ export const getSession = (roomCode: string) =>
 
 export const startSession = (roomCode: string) =>
   api.patch(`/sessions/${roomCode}/start`);
+
+export const getFilmCards = (roomCode: string) =>
+  api.get<{ films: FilmCard[] }>(`/sessions/${roomCode}/film-cards`).then((r) => r.data);
 
 export default api;

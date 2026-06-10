@@ -56,6 +56,22 @@ export default function MovieCard({ movie }: Props) {
           </div>
         )}
 
+        {movie.providers && movie.providers.length > 0 && (
+          <div className="movie-providers">
+            <span className="movie-providers-label">זמין לצפייה ב:</span>
+            {movie.providers.map((p) => (
+              <img
+                key={p.providerName}
+                src={`https://image.tmdb.org/t/p/w92${p.logoPath}`}
+                alt={p.providerName}
+                title={p.providerName}
+                className="provider-logo"
+                loading="lazy"
+              />
+            ))}
+          </div>
+        )}
+
         <div className="match-score">
           <div
             className="match-score-bar"
