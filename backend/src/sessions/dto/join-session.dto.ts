@@ -1,9 +1,9 @@
-import { IsString, MinLength, MaxLength } from 'class-validator';
+import { IsString, Matches, MinLength, MaxLength } from 'class-validator';
 
+// WebSocket payload for the join_session event
 export class JoinSessionDto {
   @IsString()
-  @MinLength(6)
-  @MaxLength(6)
+  @Matches(/^[A-Z0-9]{6}$/)
   roomCode: string;
 
   @IsString()
