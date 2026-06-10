@@ -4,3 +4,23 @@
   color: var(--border-bright);
   opacity: 0.5;
 }
+
+.movie-providers {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.movie-providers-label {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.provider-logo {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}

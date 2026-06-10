@@ -1,0 +1,19 @@
+/* ConnectionBanner component styles */
+
+.connection-banner {
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: var(--z-toast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border-gold);
+  color: var(--accent-bright);
+  font-size: 0.85rem;
+  animation: fade-in-up var(--transition-normal) both;
+}

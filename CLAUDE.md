@@ -41,9 +41,12 @@ movihoot/
 │   │   │   ├── questionnaire.service.ts
 │   │   │   └── dto/
 │   │   │       └── submit-answers.dto.ts
+│   │   ├── tmdb/
+│   │   │   ├── tmdb.module.ts
+│   │   │   └── tmdb.service.ts       # TMDB API (details, popular, watch providers)
 │   │   └── ai/
 │   │       ├── ai.module.ts
-│   │       └── ai.service.ts         # Claude API + TMDB integration
+│   │       └── ai.service.ts         # Claude API recommendations
 │   ├── .env
 │   └── package.json
 │
@@ -76,6 +79,7 @@ movihoot/
 ### backend/.env
 ```env
 PORT=3000
+FRONTEND_URL=                  # optional — CORS origin (any origin when empty)
 FIREBASE_PROJECT_ID=
 FIREBASE_CLIENT_EMAIL=
 FIREBASE_PRIVATE_KEY=""
@@ -101,14 +105,18 @@ sessions/{roomCode}
   ├── hostId: string           # Firebase Auth UID
   ├── status: "lobby" | "active" | "done"
   ├── participants: string[]   # nicknames
-  ├── results: MovieResult[]   # populated after AI call
-  └── createdAt: timestamp
+  ├── results: MovieResult[]   # populated after AI call (incl. providers[])
+  ├── filmCards: FilmCard[]    # 5 TMDB popular movies, stored at session start
+  ├── recommendationsTriggered: boolean  # set atomically — AI fires exactly once
+  └── createdAt: timestamp     # sessions expire lazily after 12h
 
 sessions/{roomCode}/answers/{nickname}
   ├── mood: string             # e.g. "happy", "tired", "adventurous"
   ├── genres: string[]         # e.g. ["comedy", "action"]
   ├── length: "short" | "medium" | "long"
-  ├── knownFilms: number[]     # TMDB movie IDs
+  ├── energyLevel: "low" | "medium" | "high"
+  ├── knownFilms: number[]     # TMDB movie IDs the participant has seen
+  ├── likedFilms: number[]     # subset of knownFilms they liked (taste signal)
   └── submittedAt: timestamp
 
 hosts/{uid}
@@ -119,15 +127,26 @@ hosts/{uid}
 
 ## WebSocket Events (Socket.io)
 
+Client → server events are validated and answered with an ack envelope:
+`{ ok: true, ...data }` or `{ ok: false, code, message }` (Hebrew message,
+rendered by the frontend as-is). See `backend/src/sessions/ws.utils.ts`.
+
 | Event | Direction | Payload | Description |
 |---|---|---|---|
-| `join_session` | client → server | `{ roomCode, nickname }` | Participant joins room |
+| `watch_session` | client → server | `{ roomCode, token }` | Host joins broadcast room; Firebase ID token verified against hostId |
+| `join_session` | client → server | `{ roomCode, nickname }` | Participant joins room; rejects duplicate live nicknames; rejoin allowed mid-session |
 | `user_joined` | server → clients | `{ nickname, count }` | Broadcast new participant |
-| `start_session` | client → server | `{ roomCode }` | Host starts questionnaire |
-| `session_started` | server → clients | `{}` | Redirect all to questionnaire |
+| `session_started` | server → clients | `{}` | Redirect all to questionnaire (broadcast by REST start endpoint) |
 | `answers_submitted` | client → server | `{ roomCode, nickname, answers }` | User finishes questionnaire |
+| `answer_received` | server → clients | `{ nickname }` | A participant's answers were stored |
 | `all_answered` | server → clients | `{ results: Movie[] }` | All users done, show results |
-| `user_left` | server → clients | `{ nickname }` | Participant disconnected |
+| `recommendation_error` | server → clients | `{ message }` | AI/TMDB recommendation flow failed |
+| `user_left` | server → clients | `{ nickname }` | Participant disconnected (30s grace period mid-session) |
+| `host_left` / `host_back` | server → clients | `{}` | Host socket dropped / returned |
+
+Session start is REST-only: `PATCH /sessions/:roomCode/start` (auth + ownership
++ lobby-status checks) — there is no `start_session` WS event. Film cards for
+the known-films step are public: `GET /sessions/:roomCode/film-cards`.
 
 ## Session Flow
 
@@ -160,10 +179,11 @@ hosts/{uid}
 
 ## Claude API Prompt Structure (ai.service.ts)
 ```
-System: You are a movie recommendation expert. Given group preferences, return exactly 5 movie recommendations as JSON.
+System: You are a movie recommendation expert. Given group preferences, return exactly 5 movie recommendations as JSON. Never recommend a movie the group has already seen. Use films the group liked as a signal of their taste.
 
 User: A group of {N} people answered these questions:
-{aggregated answers summary}
+{aggregated answers summary — moods, genres, lengths, energy levels,
+ seen films (excluded), liked films (taste signal)}
 
 Return JSON: { movies: [ { tmdbId, title, reason, matchScore } ] }
 ```
@@ -171,18 +191,26 @@ Return JSON: { movies: [ { tmdbId, title, reason, matchScore } ] }
 ## Key Implementation Notes
 - roomCode: 6 uppercase alphanumeric chars, stored as Firestore doc ID
 - Participants are anonymous — no Firebase Auth, identified by nickname + socketId
-- Auth Guard applies only to Host routes (POST /sessions, PATCH /sessions/:id/start)
-- TMDB images base URL: `https://image.tmdb.org/t/p/w500`
+- Auth Guard applies only to Host routes (POST /sessions, GET/PATCH /sessions/:id)
+- WS payloads validated with class-validator (`ws.utils.ts` validatePayload); per-socket rate limiting + @nestjs/throttler on REST
+- "All answered" check runs in a Firestore transaction with a `recommendationsTriggered` flag — the AI call fires exactly once
+- Disconnected participants get a 30s grace period mid-session before removal (page refresh ≠ leaving); after removal the all-answered check re-runs
+- TMDB access goes through `backend/src/tmdb/tmdb.service.ts` (details, popular movies, watch providers with IL→US fallback)
+- TMDB images base URL: `https://image.tmdb.org/t/p/w500` (provider logos: w92)
 - Frontend uses `qrcode.react` for QR generation
 - Use `@nestjs/platform-socket.io` for WebSocket Gateway
+- Frontend keeps one Socket.io connection for the app lifetime (`useSocket.tsx`), tracks connection status, and rejoins rooms after reconnect
 
 ## Commands
 ```bash
 # Backend
 cd backend && npm run start:dev
+cd backend && npm test          # unit tests (sessions, questionnaire, ai, tmdb)
+cd backend && npm run lint
 
 # Frontend
 cd frontend && npm run dev
+cd frontend && npm run build    # tsc + vite
 ```
 
 ## Current Status
@@ -192,8 +220,12 @@ cd frontend && npm run dev
 - [x] firebase.service.ts (Admin SDK)
 - [x] auth.guard.ts
 - [x] sessions.module + controller + service
-- [x] sessions.gateway.ts (WebSockets)
-- [x] questionnaire.module + service
-- [x] ai.service.ts (Claude + TMDB)
+- [x] sessions.gateway.ts (WebSockets, validated payloads + acks)
+- [x] questionnaire.module + service (transactional all-answered)
+- [x] ai.service.ts (Claude + TMDB via TmdbService)
 - [x] Frontend pages (HostDashboard, Lobby, Questionnaire, Results)
+- [x] Known-films questionnaire step (film cards + knownFilms/likedFilms)
+- [x] Where-to-watch provider badges on results
+- [x] Socket reconnect handling + connection banner + error boundary
+- [x] Backend unit tests
 - [ ] End-to-end session flow tested (needs real Firebase + API keys in .env)

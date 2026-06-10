@@ -44,3 +44,54 @@
   color: var(--text-muted);
   font-weight: 400;
 }
+
+/* Known-films step */
+.film-progress {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  text-align: center;
+  margin-bottom: 12px;
+}
+
+.film-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+  animation: fade-in-up 0.35s ease both;
+}
+
+.film-card-poster {
+  width: 160px;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-bright);
+  box-shadow: var(--shadow-card);
+}
+
+.film-card-poster--empty {
+  background: var(--bg-elevated);
+}
+
+.film-card-title {
+  font-weight: 600;
+  text-align: center;
+}
+
+.film-card-year {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.film-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.film-action-btn {
+  width: 100%;
+  justify-content: center;
+}

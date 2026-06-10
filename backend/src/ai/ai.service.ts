@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import Anthropic from '@anthropic-ai/sdk';
-import axios from 'axios';
 import { ParticipantAnswers } from '../questionnaire/questionnaire.service';
 import { MovieResult } from '../sessions/sessions.service';
+import { TmdbService, type FilmCard } from '../tmdb/tmdb.service';
 
 interface ClaudeMovie {
   tmdbId: number;
@@ -15,32 +15,31 @@ interface ClaudeResponse {
   movies: ClaudeMovie[];
 }
 
-interface TmdbMovieDetails {
-  id: number;
-  title: string;
-  overview: string;
-  poster_path: string | null;
-  release_date: string;
-  runtime: number | null;
-}
-
 @Injectable()
 export class AiService {
   private readonly logger = new Logger(AiService.name);
   private readonly anthropic = new Anthropic({
     apiKey: process.env.ANTHROPIC_API_KEY,
+    timeout: 30_000,
+    maxRetries: 1,
   });
+
+  constructor(private readonly tmdb: TmdbService) {}
 
   async getRecommendations(
     answers: ParticipantAnswers[],
+    filmCards: FilmCard[] = [],
   ): Promise<MovieResult[]> {
-    const summary = this.buildAnswersSummary(answers);
+    const summary = this.buildAnswersSummary(answers, filmCards);
 
+    const started = Date.now();
     const message = await this.anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 1024,
       system:
-        'You are a movie recommendation expert. Given group preferences, return exactly 5 movie recommendations as JSON. Respond ONLY with valid JSON — no markdown, no extra text.',
+        'You are a movie recommendation expert. Given group preferences, return exactly 5 movie recommendations as JSON. ' +
+        'Never recommend a movie the group has already seen. Use films the group liked as a signal of their taste. ' +
+        'Respond ONLY with valid JSON — no markdown, no extra text.',
       messages: [
         {
           role: 'user',
@@ -52,6 +51,9 @@ export class AiService {
         },
       ],
     });
+    this.logger.log(
+      `Claude recommendations call took ${Date.now() - started}ms for ${answers.length} participants`,
+    );
 
     const raw = (message.content[0] as { type: string; text: string }).text;
     // Claude sometimes wraps JSON in markdown fences despite instructions not to
@@ -73,49 +75,71 @@ export class AiService {
     return this.enrichWithTmdb(parsed.movies);
   }
 
-  private buildAnswersSummary(answers: ParticipantAnswers[]): string {
+  private buildAnswersSummary(
+    answers: ParticipantAnswers[],
+    filmCards: FilmCard[],
+  ): string {
     const moods = answers.map((a) => a.mood).join(', ');
     const genres = [...new Set(answers.flatMap((a) => a.genres))].join(', ');
     const lengths = answers.map((a) => a.length).join(', ');
     const energies = answers.map((a) => a.energyLevel).join(', ');
 
-    return [
+    const lines = [
       `Moods: ${moods}`,
       `Preferred genres: ${genres}`,
       `Movie length preferences: ${lengths}`,
       `Energy levels: ${energies}`,
-    ].join('\n');
+    ];
+
+    const titleOf = (id: number) =>
+      filmCards.find((f) => f.tmdbId === id)?.title ?? `tmdbId ${id}`;
+
+    const seenIds = [...new Set(answers.flatMap((a) => a.knownFilms ?? []))];
+    if (seenIds.length > 0) {
+      lines.push(
+        `Movies the group has already seen — do NOT recommend any of these: ${seenIds
+          .map((id) => `${titleOf(id)} (tmdbId ${id})`)
+          .join(', ')}`,
+      );
+    }
+
+    const likedIds = [...new Set(answers.flatMap((a) => a.likedFilms ?? []))];
+    if (likedIds.length > 0) {
+      lines.push(
+        `Movies group members saw and liked — use these as a taste signal: ${likedIds
+          .map((id) => `${titleOf(id)} (tmdbId ${id})`)
+          .join(', ')}`,
+      );
+    }
+
+    return lines.join('\n');
   }
 
   private async enrichWithTmdb(movies: ClaudeMovie[]): Promise<MovieResult[]> {
-    const tmdbKey = process.env.TMDB_API_KEY;
-    const base = process.env.TMDB_BASE_URL ?? 'https://api.themoviedb.org/3';
-
     const results = await Promise.allSettled(
       movies.map(async (movie): Promise<MovieResult> => {
+        const base: MovieResult = {
+          tmdbId: movie.tmdbId,
+          title: movie.title,
+          reason: movie.reason,
+          matchScore: movie.matchScore,
+        };
         try {
-          const { data } = await axios.get<TmdbMovieDetails>(
-            `${base}/movie/${movie.tmdbId}`,
-            { params: { api_key: tmdbKey } },
-          );
+          const [details, providers] = await Promise.all([
+            this.tmdb.getMovieDetails(movie.tmdbId),
+            this.tmdb.getWatchProviders(movie.tmdbId),
+          ]);
           return {
-            tmdbId: movie.tmdbId,
-            title: movie.title,
-            reason: movie.reason,
-            matchScore: movie.matchScore,
-            posterPath: data.poster_path ?? undefined,
-            overview: data.overview,
-            releaseYear: data.release_date?.slice(0, 4),
-            runtime: data.runtime ?? undefined,
+            ...base,
+            posterPath: details.poster_path ?? undefined,
+            overview: details.overview,
+            releaseYear: details.release_date?.slice(0, 4),
+            runtime: details.runtime ?? undefined,
+            providers,
           };
         } catch {
           // TMDB enrichment failed — return bare recommendation
-          return {
-            tmdbId: movie.tmdbId,
-            title: movie.title,
-            reason: movie.reason,
-            matchScore: movie.matchScore,
-          };
+          return base;
         }
       }),
     );
